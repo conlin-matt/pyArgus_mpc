@@ -6,16 +6,7 @@ Created on Fri Jun 26 16:22:02 2020
 @author: matthewconlin
 
 Top level script file for examing intertidal bathymetry from a surfcam at Jupiter Inlet, FL.
-A number of things are done in the following order to do this:
-        1. Load eveything in and prepare the videos
-        2. Train and apply a Random Forest Classifier to separate frames of a desired view from this PTZ camera
-        3. Create timexs using frames of the desired view
-        4. ID shorelines on the timexs using the SLIM technique
-        5. Check the shorelines
-        6. Derive the elevations of the shorelines
-        7. Create summary figure
-        8. Also create a figure of wave conditions as a discussion point 
-    
+
 Code: Matthew Conlin, University of Florida
 10/2020
 """
@@ -28,15 +19,14 @@ import os
 
 # Third-party imports #
 import cv2
-import matplotlib.image as mpimg
-import matplotlib.dates as mdates
+from matplotlib import colorbar, colors, image as mpimg, dates as mdates, patches, pyplot as plt
 from matplotlib.patches import Rectangle
-import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 import numpy as np
 import pandas as pd
 import pickle
 from scipy.interpolate import interp1d,griddata
+from scipy.io import loadmat
 from sklearn.linear_model import LinearRegression
 
 # Project imports #
@@ -52,7 +42,6 @@ from pyArgus_mpc.SurfcamArgus.GeophysicalAnalyses import vidPrep
 #=============================================================================#
 direc = '/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/RawVideo/' # Directory to save things to #
 
-calibVals = np.loadtxt('/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/Results_SurfRCaT/Test3_Jup_calibVals2.txt') # Get these by using SurfRCaT #
 rectif_xmin = -200
 rectif_xmax = 200
 rectif_dx = .2
@@ -80,17 +69,174 @@ for i in waves.columns[5:8]:
 
 
 
+#=============================================================================#
+# 1. Calibrate the camera using SurfRCaT
+    
+#=============================================================================#
+# Refer to the SurfRCaT github repo and SoftwareX publication for details. This will
+# result in a calibVals file which contains the solved-for calibration parameters.
+# I will load this in below #
+calibVals = np.loadtxt('/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/Results_SurfRCaT/Test3_Jup_calibVals2.txt') # Get these by using SurfRCaT #
+
+# Make a figure of the remote-GCPs used to complete the SurfRCaT calibration #
+im = mpimg.imread('/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/Extrinsic/GCP_01.png')
+f = open('/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/Results_SurfRCaT/gcps_im.pkl','rb'); gcps_im = pickle.load(f)
+
+fig = plt.figure(figsize=(4,3))
+ax1 = plt.axes([.05,.58,.9,.37])
+ax2 = plt.axes([.02,.26,.3,.25])
+ax3 = plt.axes([.34,.26,.3,.25])
+ax4 = plt.axes([.66,.26,.3,.25])
+ax5 = plt.axes([.02,.05,.3,.3])
+ax6 = plt.axes([.34,.05,.3,.3])
+ax7 = plt.axes([.66,.05,.3,.3])
+
+ax1.text(0.02, 0.97, 'a', transform=ax1.transAxes,fontsize=8, fontweight='bold', va='top',color='w')
+ax2.text(0.02, 0.97, 'b1', transform=ax2.transAxes,fontsize=8, fontweight='bold', va='top',color='w')
+ax3.text(0.02, 0.97, 'c1', transform=ax3.transAxes,fontsize=8, fontweight='bold', va='top',color='w')
+ax4.text(0.02, 0.97, 'd1', transform=ax4.transAxes,fontsize=8, fontweight='bold', va='top',color='w')
+ax5.text(0.02, 0.94, 'b2', transform=ax5.transAxes,fontsize=8, fontweight='bold', va='top',color='w')
+ax6.text(0.02, 0.97, 'c2', transform=ax6.transAxes,fontsize=8, fontweight='bold', va='top',color='w')
+ax7.text(0.02, 0.97, 'd2', transform=ax7.transAxes,fontsize=8, fontweight='bold', va='top',color='w')
+
+ax1.imshow(im)
+ax1.set_xticks([])
+ax1.set_yticks([])
+for p in gcps_im:
+    ax1.plot(p[0][0],p[0][1],'r+',markersize=6)
+rect1 = patches.Rectangle((230,500),340,-200,edgecolor='k',facecolor='none',linewidth=1,linestyle='--')
+rect2 = patches.Rectangle((1350,550),200,-100,edgecolor='k',facecolor='none',linewidth=1,linestyle='--')
+rect3 = patches.Rectangle((1450,650),200,-100,edgecolor='k',facecolor='none',linewidth=1,linestyle='--')
+con1 = patches.ConnectionPatch(xyA=(230,500),xyB=(400,350),coordsA="data",coordsB="data",axesA=ax1,axesB=ax2,color='k')
+con2 = patches.ConnectionPatch(xyA=(1350,550),xyB=(1450,450),coordsA="data",coordsB="data",axesA=ax1,axesB=ax3,color='k')
+con3 = patches.ConnectionPatch(xyA=(1650,650),xyB=(1550,550),coordsA="data",coordsB="data",axesA=ax1,axesB=ax4,color='k')
+con1_1 = patches.ConnectionPatch(xyA=(400,480),xyB=(609,400),coordsA="data",coordsB="data",axesA=ax2,axesB=ax5,color='k')
+con2_1 = patches.ConnectionPatch(xyA=(1450,550),xyB=(609,400),coordsA="data",coordsB="data",axesA=ax3,axesB=ax6,color='k')
+con3_1 = patches.ConnectionPatch(xyA=(1550,650),xyB=(609,400),coordsA="data",coordsB="data",axesA=ax4,axesB=ax7,color='k')
+
+ax1.add_patch(rect1)
+ax1.add_patch(rect2)
+ax1.add_patch(rect3)
+ax1.add_artist(con1)
+ax1.add_artist(con2)
+ax1.add_artist(con3)
+
+ax2.imshow(im)
+ax2.set_xticks([])
+ax2.set_yticks([])
+for p in gcps_im:
+    ax2.plot(p[0][0],p[0][1],'r+',markersize=10)
+ax2.set_xlim(280,520)
+ax2.set_ylim(480,350)
+ax2.add_artist(con1_1)
+
+ax3.imshow(im)
+ax3.set_xticks([])
+ax3.set_yticks([])
+for p in gcps_im:
+    ax3.plot(p[0][0],p[0][1],'r+',markersize=10)
+ax3.set_xlim(1350,1550)
+ax3.set_ylim(550,450)
+ax3.add_artist(con2_1)
+
+ax4.imshow(im)
+ax4.set_xticks([])
+ax4.set_yticks([])
+for p in gcps_im:
+    ax4.plot(p[0][0],p[0][1],'r+',markersize=10)
+ax4.set_xlim(1450,1650)
+ax4.set_ylim(650,550)
+ax4.add_artist(con3_1)
+
+ax5.imshow(mpimg.imread('/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/Results_SurfRCaT/GCPs_lidar_ex_1.png'))
+ax5.set_xticks([])
+ax5.set_yticks([])
+ax5.set_ylim(500,0)
+ax5.plot(614.59,171.591249,'k+')
+ax5.plot(408.0375,344.648749,'k+')
+ax5.plot(876.9675,394.891249,'k+')
+
+ax6.imshow(mpimg.imread('/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/Results_SurfRCaT/GCPs_lidar_ex_2.png'))
+ax6.set_xticks([])
+ax6.set_yticks([])
+ax6.set_ylim(700,0)
+ax6.plot(732.736,414.351,'k+')
+
+ax7.imshow(mpimg.imread('/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/Results_SurfRCaT/GCPs_lidar_ex_3.png'))
+ax7.set_xticks([])
+ax7.set_yticks([])
+ax7.set_ylim(700,0)
+ax7.plot(517.149,466.725,'k+')
+
+
+
 
 #=============================================================================#
-# Get the Jupiter video path list and the dictionary of video dates/times
+# 2. Calculate and visualize the accuracy of the calibration by calculating checkpoint reprojection residuals
+
 #=============================================================================#
+# Calculate the residuals #
+gcpFile = '/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/Extrinsic/gcpLocs.txt'
+gcpxy = loadmat('/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/Extrinsic/allUV.mat')['UV']
+checks = np.arange(1,39)
+camLoc = (592268.60,2979958.33)
+resids,rmsResid,gcpXYreproj = comp.calcCheckPointResid(calibVals,gcpxy,gcpFile,checks,camLoc)
+
+# Make a figure showing the residuals on a rectified image #
+im = mpimg.imread('/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/Extrinsic/GCP_01.png')
+im_rectif,extents = comp.RectifyImage(calibVals,im,[rectif_xmin,rectif_xmax,rectif_dx,rectif_ymin,rectif_ymax,rectif_dy,0])
+
+scale_r = np.linspace(1,.5,11)
+scale_g = np.linspace(1,0,11)
+scale_b = np.linspace(1,0,11)
+carr = np.transpose(np.vstack([scale_r,scale_g,scale_b]))
+clist = [tuple(i) for i in carr]
+cm = colors.ListedColormap(clist)
+plt.rcParams.update({'font.size': 8})
+fig = plt.figure(figsize=(2.74,3.5))
+ax1 = plt.axes([.2,.1,.6,.85])
+cbax = plt.axes([.78,.1,.04,.85]) 
+ax2 = plt.axes([.41,.64,.34,.31])
+ax2.set_xticks([])
+ax2.set_yticks([])
+ax3 = plt.axes([.5,.68,.24,.25])
+ax3.spines['top'].set_visible(False)
+ax3.spines['right'].set_visible(False)
+ax3.set_xticks([])
+ax1.imshow(im_rectif,extent=extents)
+for i in range(0,len(gcpXYreproj)):
+    r = np.floor(resids[i])
+    if r>10:
+        ci=10
+    else:
+        ci=int(r)
+    ax1.plot(gcpXYreproj[i][1]-592268.6,gcpXYreproj[i][2]-2979958.33,'o',markeredgecolor='k',markerfacecolor=clist[ci])
+cb1=colorbar.ColorbarBase(cbax,cmap=cm,boundaries=[0,1,2,3,4,5,6,7,8,9,10,11],ticks=[0,1,2,3,4,5,6,7,8,9,10],spacing='proportional',orientation='vertical',label='Reprojection residual (m)')
+ax1.set_xlabel('Relative Easting (m)',fontsize=8)
+ax1.set_ylabel('Relative Northing (m)',fontsize=8)
+ax1.set_xticks([-200,-100,0,100])
+ax3.boxplot(resids,sym='kx')
+ax3.set_xticks([])
+ax3.set_ylim(0,20)
+ax3.set_yticks([0,5,10,15,20])
+ax3.set_xlim(0.85,1.15)
+
+
+
+#=============================================================================#
+# 3. Perform the intertidal bathymetry mapping analysis
+
+#=============================================================================#
+
+#======================================================#
+# 3.1. Get the Jupiter video path list and the dictionary of video dates/times
+#======================================================#
 links,pthList = vidPrep.prep_JupiterInletFL()
             
 
-#=============================================================================#
-# Train the machine learning view-separation
-#=============================================================================#
-
+#======================================================#
+# 3.2. Train the machine learning view-separation
+#======================================================#
 # Once you run the below two lines, you can save dataAr_filled and relod it on future runs #
 f = open('/Users/matthewconlin/Documents/Research/WebCAT/Applications/Jupiter/RawVideo/dataAr.pkl','rb')
 dataAr = pickle.load(f)
@@ -100,10 +246,10 @@ ml = sca.PTZViewSepML(vidList=pthList,percentTraining=60,viewWant=1,existingData
 clf,dataAr_filled,accuracy,numObs,numMissed,numFalse = ml.train() # Train the classifier #
 
 
-#=============================================================================#
-# For each video: apply the ml to separate frames and create a timex of the desired view. This part takes a few minutes for every video. Can skip #
-# this step if you already have timexs made #
-#=============================================================================#
+#=====================================================#
+# 3.3. For each video: apply the ml to separate frames and create a timex of the desired view. 
+# This part takes a few minutes for every video. Can skip this step if you already have timexs made. #
+#=====================================================#
 for key in links:
     ar = links[key]
     for i in range(8,len(ar)):
@@ -140,9 +286,9 @@ for key in links:
                 
 
 
-#=============================================================================#
-# ID each shoreline with SLIM and assign elevations
-#=============================================================================#                
+#=============================================================#
+# 3.4. ID each shoreline with SLIM and assign elevations
+#=============================================================#                
 slims = {}
 timexs = [i for i in os.listdir(direc+'timexs') if 'timex' in i]   
 transects = None
@@ -200,9 +346,9 @@ for im in timexs:
         slims[im.split('_')[2].split('.')[0]] = [slim_a,Z_sl]
  
 
-#=============================================================================#
-# Manually check and remove bad SLIM estimates with interactive point clicking. #
-#=============================================================================#
+#=====================================================#
+# 3.5. Manually check and remove bad SLIM estimates with interactive point clicking. #
+#=====================================================#
 for im in timexs:
     
     im = direc+'timexs/'+im
@@ -254,9 +400,9 @@ for im in timexs:
         
         
         
-#=============================================================================#
-# Make maps and do analyses #
-#=============================================================================#
+#=========================================#
+# 3.6. Make maps and do analyses #
+#=========================================#
 
 ## Load in the slims variable ##        
 cmat07x = np.empty([250,0]); cmat14x = np.empty([250,0]);
@@ -411,10 +557,6 @@ ax4.set_ylabel('Relative northing (m)',fontsize=8)
 ax4.set_xticks([0,5,10,15])
 ax3.set_ylim(300,555)
 fig.legend((H[2][0],H[1][0],H[0][0]),('0.00 m','-0.50 m','-0.75 m'),loc='lower left',bbox_to_anchor=(.76,.15,.07,.5),labelspacing=.2,borderpad=0.2)
-
-
-
-
 
 
 
