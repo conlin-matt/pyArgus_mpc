@@ -346,5 +346,64 @@ def RectifyImage(calibVals,img,grd):
 
 
 
+def calcCheckPointResid(calibVals,gcpxy,gcpFile,checks,camLoc):
+    
+    '''
+    Calculate the residuals of check points (Euclidean distance) based on intrinsic/extrinsic calibration
+    and point measurements (with e.g. GPS).
+    
+    Inputs:
+        calibVals (list): A list containing the corrected calibration values in the order [omega,phi,kappa,camX,camY,camZ,f,x0,y0]
+        gcpxy (array): nx2 array of image coordinates (U,V) for each of the points 
+        gcpFile (str): path to the file containing the measured GCP locations
+        checks (list): list containing the numbers of the GCPs to use as checkpoints (first point is number 1)
+        camLoc (tuple): measured camera location (camX,camY)
+        
+    Returns:
+        resids (array): nx1 array of computed residuals for each point
+        rms (float): The root mean squared value of computed residuals
+        gcpXYreproj (array): nx2 array of reprojected positions for each point (X,Y)
+        
+    '''
+    try:
+        gcpFile = np.loadtxt(gcpFile,delimiter=' ')  
+    except:
+        gcpFile = np.loadtxt(gcpFile,delimiter=',') 
+    camX = camLoc[0]
+    camY = camLoc[1]
+       
+    #=============================================================================#
+    # Calculate the reprojected positions of each GCP based on calibVals #
+    #=============================================================================#   
+    gcpXYreproj = np.empty([0,3])
+    
+    for i in checks:
+        X,Y = calcXYZ(calibVals,gcpxy[i-1,0],gcpxy[i-1,1],gcpFile[i-1,3]) 
+    
+        X = X+camX
+        Y = Y+camY  
+        
+        gcpXYreproj = np.vstack([gcpXYreproj,np.hstack([int(i),X,Y])])
+        
+        
+    #=============================================================================#
+    # Calculate the residuals #
+    #=============================================================================#  
+    difs = gcpFile[checks-1,1:3] - gcpXYreproj[:,1:3]
+    resids = np.sqrt(difs[:,0]**2 + difs[:,1]**2) 
+    rms = np.sqrt(np.sum(np.power(resids,2))/len(resids))
+    
+    return resids,rms,gcpXYreproj
+        
+        
+        
+        
+        
+        
+        
+        
+    
+    
+    
 
 
