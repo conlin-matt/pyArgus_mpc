@@ -360,6 +360,7 @@ def calcCheckPointResid(calibVals,gcpxy,gcpFile,checks,camLoc):
         camLoc (tuple): measured camera location (camX,camY)
         
     Returns:
+        difs (array): nx2 array of residual in each direction, column 1 for the x-dir and column 2 for the y-dir
         resids (array): nx1 array of computed residuals for each point
         rms (float): The root mean squared value of computed residuals
         gcpXYreproj (array): nx2 array of reprojected positions for each point (X,Y)
@@ -393,7 +394,7 @@ def calcCheckPointResid(calibVals,gcpxy,gcpFile,checks,camLoc):
     resids = np.sqrt(difs[:,0]**2 + difs[:,1]**2) 
     rms = np.sqrt(np.sum(np.power(resids,2))/len(resids))
     
-    return resids,rms,gcpXYreproj
+    return difs,resids,rms,gcpXYreproj
         
         
         

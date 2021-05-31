@@ -11,9 +11,11 @@ import math
 
 # Third-party imports #
 import datetime
+import io
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import requests
 from scipy import optimize
 from scipy.interpolate import interp1d
 
@@ -36,10 +38,10 @@ class NOAAWaterLevelRecord():
         
     '''
     
-    def __init__(self,station,bdate,edate):
+    def __init__(self,station,byear,eyear):
         self.station=station
-        self.bdate = bdate
-        self.edate = edate
+        self.byear = byear
+        self.eyear = eyear
         
     
     def get(self):
@@ -47,18 +49,44 @@ class NOAAWaterLevelRecord():
         product = 'hourly_height&application=UF'
         product2 = 'predictions&application=UF'
         
-        api = 'https://tidesandcurrents.noaa.gov/api/datagetter?product='+product+'&begin_date='
-        url = api+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=NAVD&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&format=csv'
-        api2 = 'https://tidesandcurrents.noaa.gov/api/datagetter?product='+product2+'&begin_date='
-        url2 = api2+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=NAVD&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&interval=h&format=csv'
+        if self.byear == self.eyear:
+            self.bdate = str(self.byear)+'0101'
+            self.edate = str(self.eyear)+'1231'
         
-        
-        dat_obs = pd.read_csv(url)
-        dat_pred = pd.read_csv(url2)
-        
+            api = 'https://tidesandcurrents.noaa.gov/api/datagetter?product='+product+'&begin_date='
+            url = api+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=MSL&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&format=csv'
+            api2 = 'https://tidesandcurrents.noaa.gov/api/datagetter?product='+product2+'&begin_date='
+            url2 = api2+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=MSL&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&interval=h&format=csv'
+            
+            
+            dat_obs = pd.read_csv(url)
+            dat_pred = pd.read_csv(url2)
+            
+
+        else: 
+            dat_obs = None
+            dat_pred = None
+            for yr in range(int(self.byear),int(self.eyear)+1):
+                self.bdate = str(yr)+'0101'
+                self.edate = str(yr)+'1231'
+                
+                api = 'https://tidesandcurrents.noaa.gov/api/datagetter?product='+product+'&begin_date='
+                url = api+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=MSL&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&format=csv'
+                api2 = 'https://tidesandcurrents.noaa.gov/api/datagetter?product='+product2+'&begin_date='
+                url2 = api2+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=MSL&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&interval=h&format=csv'
+            
+                if dat_obs is None:
+                    dat_obs = pd.read_csv(url)
+                    dat_pred = pd.read_csv(url2)
+                else:
+                    dat_obs = dat_obs.append(pd.read_csv(url))
+                    dat_pred = dat_pred.append(pd.read_csv(url2))
+                    
+        dat_obs = dat_obs.reset_index()
+        dat_pred = dat_pred.reset_index()
         wl = pd.DataFrame({'Time':dat_obs['Date Time'],'wl_obs':dat_obs[' Water Level'],'wl_pred':dat_pred[' Prediction']})
-        
         self.wl = wl
+            
         return wl
     
     def atTime(self,wl,date):
@@ -112,19 +140,21 @@ class NDBCWaveRecord():
         allDat = None  
         for yr in self.years:
             
-            if yr != datetime.datetime.now().year:
+            if yr != 2021:#datetime.datetime.now().year:
                 url = 'https://www.ndbc.noaa.gov/view_text_file.php?filename='+str(self.station)+'h'+str(yr)+'.txt.gz&dir=data/historical/stdmet/'
                 dat = pd.read_csv(url,sep=' ',delimiter=' ',header=2,index_col=False,usecols=[0,1,2,3,4,9,11,13,15],
                                   names=['yr','mo','day','hr','mm','wvht (m)','DPD (sec)','APD (sec)','MWD (degT)'])
             else:
-                for i in range(1,datetime.datetime.now().month):
+                for i in range(1,12):#datetime.datetime.now().month):
                     try:
                         datetime_object = datetime.datetime.strptime(str(i), "%m")
                         month_name = datetime_object.strftime("%b")
                         
                         url = 'https://www.ndbc.noaa.gov/view_text_file.php?filename='+str(self.station)+str(i)+str(yr)+'.txt.gz&dir=data/stdmet/'+month_name+'/'
                
-                        dat1 = pd.read_csv(url,sep=' ',delimiter=' ',header=1,index_col=False,usecols=[0,1,2,3,4,8,9,10,11],skipinitialspace=True,
+                        datastr = requests.get(url).text
+                        data_file = io.StringIO(datastr)
+                        dat1 = pd.read_csv(data_file,sep=' ',delimiter=' ',header=1,index_col=False,usecols=[0,1,2,3,4,8,9,10,11],skipinitialspace=True,
                                            names=['yr','mo','day','hr','mm','wvht (m)','DPD (sec)','APD (sec)','MWD (degT)'])
                         if i == 1:
                             dat = dat1
@@ -217,6 +247,49 @@ def newtRaph(T,h):
 
     return k2
 
+
+def shoalWave(d,H,T,theta):
+    '''
+    Function to propagate a wave to breakpoint, assuming parallel and linear contours, using linear wave theory.
+    
+    args:
+        d: The depth at which wave observations are collected (e.g. depth of buoy)
+        H: Wave heiight measured at buoy
+        T: Wave period measured at buoy
+        theta: Wave direction measured at buoy
+        
+    returns:
+        Hb: The breaking wave height
+        dir_b: The breaking wave angle relative to the coast
+    
+    '''
+    
+    d_vec = np.arange(-d,0,0.2) # Vector of water depths #
+    # Wave parameters at buoy #  
+    k0 = newtRaph(T,d)
+    C0 = ((2*math.pi)/k0)/T
+    n0 = 0.5*(1+((2*k0*d)/math.sinh(2*k0*d)))
+    alpha0 = theta
+    Hh = H
+    ###
+    # Calc new parameters at each depth #
+    for h in d_vec[1:len(d_vec)]:
+        k = newtRaph(T,-h)
+        C = ((2*math.pi)/k)/T
+        n = 0.5*(1+((2*k*-h)/math.sinh(2*k*-h))) 
+        alpha = math.degrees(math.asin((C/C0)*math.sin(math.radians(alpha0))))
+        Hs = math.sqrt((n0*C0)/(n*C))*math.sqrt(math.cos(math.radians(alpha0))/math.cos(math.radians(alpha)))*Hh
+        if Hs/-h>=0.78:
+            Hb = Hs
+            dir_b = alpha
+            break
+        else:
+            k0 = k
+            C0 = C
+            n0 = n
+            alpha0 = alpha
+            Hh = Hs
+    return Hb,dir_b
 
     
 def ShorelineElevation(wl,Hs,Hrms,d,T,A,beta,kk,gamma):        

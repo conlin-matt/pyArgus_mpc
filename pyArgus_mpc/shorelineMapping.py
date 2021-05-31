@@ -26,7 +26,7 @@ from sklearn.linear_model import LinearRegression
 
 
 
-def mapShorelineSLIM(im_rectif,grd,transects=None):
+def mapShorelineSLIM(im_rectif,grd,transects=None,makeFigureTransect=None):
     
     '''
     Function to map the shoreline on an image using the Shoreline Intensity Maximum (SLIM)
@@ -59,6 +59,33 @@ def mapShorelineSLIM(im_rectif,grd,transects=None):
     Matthew P. Conlin, University of Florida
     09/2020      
     '''
+    
+    def makeFigure(im_rectif,grd,slim,tx_world,ty_world,tdist_world,pnorm,popt,x_slim,y_slim):
+        
+        fig = plt.figure(figsize=(3.25,3))
+        ax1 = plt.axes([.15,.15,.35,.75])
+        ax2 = plt.axes([.55,.5,.3,.4])
+        
+        ax1.imshow(im_rectif,extent=[grd[0],grd[1],grd[3],grd[4]],interpolation='bilinear')
+        ax1.axis('equal')
+        ax1.plot(tx_world,ty_world,'k')
+        [ax1.plot(i[0],i[1],'r+',markersize=1) for i in slim]
+        ax1.set_xlim(-200,100)
+        ax1.set_xlabel('Relative Easting (m)')
+        ax1.set_ylabel('Relative Northing (m)')
+        ax1.text(grd[0]+20,grd[4]-25,'c',fontweight='bold')
+        
+        h1 = ax2.plot(tdist_world-min(tdist_world),pnorm,'k.',markersize=3)
+        h2 = ax2.plot(tdist_world-min(tdist_world),model(tdist_world,*popt),'b-')
+        h3 = ax2.plot(popt[4]-min(tdist_world),model(tdist_world,*popt)[np.where(abs(tdist_world-popt[4]) == min(abs(tdist_world-popt[4])))[0]][0],'r+',markersize=15)
+        ax2.set_ylabel('Norm. intensity')
+        ax2.set_xlabel('Along-line dist. (m)')
+        ax2.yaxis.tick_right()
+        ax2.yaxis.set_label_position('right')
+        fig.legend([h1[0],h2[0],h3[0]],['Intensity profile','Model','SLIM'],bbox_to_anchor=[.65,.08,.3,.3])
+        ax2.text(0,.95,'d',fontweight='bold')
+        
+        
     
     # Identify the site curvature to get cross-shore transects #
     if not transects:
@@ -100,9 +127,14 @@ def mapShorelineSLIM(im_rectif,grd,transects=None):
         if iSLIM>30/dx:
             tdist_world = tdist_world[int(iSLIM-round(30/dx)):int(iSLIM+round(30/dx))]
             p1 = p1[int(iSLIM-round(30/dx)):int(iSLIM+round(30/dx))]
+            tx_world = tx_world[int(iSLIM-round(30/dx)):int(iSLIM+round(30/dx))]
+            ty_world = ty_world[int(iSLIM-round(30/dx)):int(iSLIM+round(30/dx))]
+
         else:
             tdist_world = tdist_world[0:int(iSLIM+round(30/dx))]
             p1 = p1[0:int(iSLIM+round(30/dx))]
+            tx_world = tx_world[0:int(iSLIM+round(30/dx))]
+            ty_world = ty_world[0:int(iSLIM+round(30/dx))]
 
         
 #        fig = plt.figure()
@@ -170,6 +202,19 @@ def mapShorelineSLIM(im_rectif,grd,transects=None):
             slim.append(np.array([x_slim,y_slim]))
         else:
             slim.append(np.array([np.nan,np.nan]))
+            
+        
+        #============================================================#
+        # Save the needed parameters to make a figure using this transect, if desireable
+        #============================================================#              
+        if makeFigureTransect is not None:
+            if (t == transects[25]).all():
+                toPlot = [tx_world,ty_world,tdist_world,pnorm,popt,x_slim,y_slim]
+    
+    # Make a summary figure, if desired #
+    if makeFigureTransect is not None:            
+        makeFigure(im_rectif,grd,slim,toPlot[0],toPlot[1],toPlot[2],toPlot[3],toPlot[4],toPlot[5],toPlot[6])
+                
         
     return slim,transects
 
