@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Mar  2 13:41:07 2021
+Created on Wed Aug 19 15:39:43 2020
 
 @author: matthewconlin
 """
@@ -9,23 +9,24 @@ Created on Tue Mar  2 13:41:07 2021
 # Standard library imports #
 import math
 import os
-import random
 
 # Third-party imports #
 import cv2
 from datetime import datetime,timedelta
-from matplotlib import colorbar, colors, image as mpimg, patches, pyplot as plt
+from matplotlib import colorbar, colors, image as mpimg, patches, pyplot as plt, dates as mdates
 import numpy as np
 import pickle
-from scipy.interpolate import griddata
+from scipy.interpolate import interp1d
 from scipy.io import loadmat
-from scipy.signal import find_peaks,savgol_filter
 from sklearn.linear_model import LinearRegression
+
+
 
 # Project imports #
 from pyArgus_mpc import computation as comp, shorelineMapping as sl, utils
 from pyArgus_mpc.SurfcamArgus import analysisTools as sca
 from pyArgus_mpc.SurfcamArgus.GeophysicalAnalyses import vidPrep
+
 
 
 #=============================================================================#
@@ -46,8 +47,6 @@ wl1 = wlobj1.get()
 wl2 = wlobj2.get()
 
 
-
-
 #=============================================================================#
 # 1. Calibrate the camera using SurfRCaT
     
@@ -57,7 +56,6 @@ wl2 = wlobj2.get()
 # I will load this in below #
 f = open('/Users/matthewconlin/Documents/Research/WebCAT/Applications/StLucie/Results_SurfRCaT/SensitivityTest/calibVals_optim.pkl','rb') # Get these from SurfCaT #
 calibVals = pickle.load(f)
-
 # Make a figure of the remote-GCPs used to complete the SurfRCaT calibration #
 im = mpimg.imread('/Users/matthewconlin/Documents/Research/WebCAT/Applications/StLucie/Extrinsic/GCP_25.png')
 f = open('/Users/matthewconlin/Documents/Research/WebCAT/Applications/StLucie/Results_SurfRCaT/gcps_im.pkl','rb'); gcps_im = pickle.load(f)
@@ -217,6 +215,303 @@ ax4.set_ylabel('N-S',labelpad=-15,fontsize=6)
 # 3. Perform the shoreline mapping analysis
 
 #=============================================================================#
+
+#=====================================================#
+# 3.1. Loop to create timex, rectify, and ID shoreline for each video we want to use #
+#=====================================================#
+shorelines = {}
+vids = ['202003051200','202008011500','202008021146'] # Chose these because they all have similar observed water levels #
+h = None
+zv = []
+for vid in vids:
+    
+    # Reduce the video #
+    if not os.path.exists(vidDirec+'StLucie_'+vid+'_reduced.avi'):
+        vidPrep.ReduceVid(vidDirec+'StLucie_'+vid+'.ts') # Reduce the vid to 1 frame per sec
+     
+    # Make the timex #    
+    if not os.path.exists(vidDirec+'StLucie_'+vid+'_timex.png'):
+        timex = sca.CreateImageProduct(vidDirec+'StLucie_'+vid+'_reduced.avi',1)
+        
+        timex_towrite = np.stack([timex[:,:,2]*255,timex[:,:,1]*255,timex[:,:,0]*255],axis=2)
+        cv2.imwrite(vidDirec+'StLucie_'+vid+'_timex.png',timex_towrite) 
+    else:
+        timex = mpimg.imread(vidDirec+'StLucie_'+vid+'_timex.png')
+        
+    # Rectify the timex # # WL not available from API for August at time of writing #
+    z_rectif1 = wlobj1.atTime(wl1,vid) # Get the observed water level fromt the closest station at the top of the hour #
+    z_rectif2 = wlobj2.atTime(wl2,vid) # Get the observed water level fromt the closest station at the top of the hour #
+    distance_betweenStations = 215 # Along-coast distance (km) between the two stations
+    distance_toInlet = 150 # Along-coast distance from northern station to Jupiter Inlet #
+    z_rectif = np.interp(distance_toInlet,[0,distance_betweenStations],[z_rectif1,z_rectif2])
+    zv.append(z_rectif)
+           
+    im_rectif,extents = comp.RectifyImage(calibVals,timex,[rectif_xmin,rectif_xmax,rectif_dx,rectif_ymin,rectif_ymax,rectif_dy,z_rectif])
+    
+    # ID the shoreline. Need to take a couple contours because of the trees #
+    if h is not None:
+        c,_h = sl.mapShorelineCCD(im_rectif,[rectif_xmin,rectif_xmax,rectif_dx,rectif_ymin,rectif_ymax,rectif_dy,z_rectif],h)
+    else:
+        c,h = sl.mapShorelineCCD(im_rectif,[rectif_xmin,rectif_xmax,rectif_dx,rectif_ymin,rectif_ymax,rectif_dy,z_rectif])
+        
+    if vid==vids[0]:
+        xyz = np.vstack([c[0]]) # Note that the specific contours taken may need to change based on the bounding box that was selected #
+    elif vid==vids[1]:
+        xyz = np.vstack([c[0],c[1]])
+    elif vid==vids[2]:
+        xyz = np.vstack([c[0],c[1]])
+        
+    # Check the shoreline position visually #
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    plt.imshow(im_rectif,extent=extents,interpolation='bilinear')
+    plt.axis('equal')
+    plt.plot(xyz[:,0],xyz[:,1],'r')
+    fig.show()
+#    plt.savefig(vidDirec+'StLucie_'+vid+'_rectif.png')
+    
+    # Save the shoreline #
+    shorelines[vid] = xyz
+ 
+      
+   
+#============================================#
+# 3.2. Make the summary figure #
+#============================================#
+plt.rcParams.update({'font.size': 8})
+fig = plt.figure(figsize=(6,4))
+ax1 = plt.axes([.1,.7,.2,.2])
+ax2 = plt.axes([.4,.7,.2,.2],sharey=ax1)
+ax3 = plt.axes([.7,.7,.2,.2],sharey=ax1)
+ax4 = plt.axes([.1,.1,.8,.5])
+ax4.set_xlabel('Relative easting (m)',fontsize=10)
+ax4.set_ylabel('Relative northing (m)',fontsize=10)
+
+ax1.text(0.06, 0.97, 'a', transform=ax1.transAxes,fontsize=8, fontweight='bold', va='top',color='w')
+ax2.text(0.06, 0.97, 'b', transform=ax2.transAxes,fontsize=8, fontweight='bold', va='top',color='w')
+ax3.text(0.06, 0.97, 'c', transform=ax3.transAxes,fontsize=8, fontweight='bold', va='top',color='w')
+ax4.text(0.97, 0.97, 'd', transform=ax4.transAxes,fontsize=8, fontweight='bold', va='top',color='k')
+
+l = []
+for vid,sub,shoreline,col,colu,a in zip(vids,[ax1,ax2,ax3],shorelines,['r','g','b'],[[240/255,128/255,128/255],[152/255,251/255,152/255],[135/255,206/255,250/255]],[.8,.6,.4]):
+    
+    timex = mpimg.imread(vidDirec+'StLucie_'+vid+'_timex.png')
+   
+    # Rectify the timex # # WL not available from API for August at time of writing #
+    if vid == vids[1]:
+        z_rectif = zv[0]
+    elif vid == vids[2]:
+        z_rectif = zv[1]
+    else:
+        z_rectif = zv[2]
+           
+    im_rectif,extents = comp.RectifyImage(calibVals,timex,[rectif_xmin,rectif_xmax,rectif_dx,rectif_ymin,rectif_ymax,rectif_dy,z_rectif])
+    
+    # Plot the timex with the shoreline ID #
+    sub.imshow(im_rectif,extent=extents,interpolation='bilinear')
+    sub.axis('equal')
+    sub.plot(shorelines[shoreline][:,0],shorelines[shoreline][:,1],col)
+
+#    # Produce uncertainty bounds #
+#    if sub != ax2:
+#        e = 3.59
+#    else:
+#        e = 3.59+1.3
+#    v = np.vstack([shorelines[shoreline][:,0],shorelines[shoreline][:,1]]) 
+#    ang = np.tan(np.divide(np.diff(v[1,:]),np.diff(v[0,:])))
+#    ang_norm = ang+(math.pi/2)
+#    mid = np.vstack([(np.diff(v[0,:])/2)+v[0,0:len(v[0,:])-1],(np.diff(v[1,:])/2)+v[1,0:len(v[0,:])-1]])
+#    y1 = e*np.sin(ang_norm)+mid[1,:]
+#    x1 = e*np.cos(ang_norm)+mid[0,:]
+#    y2 = e*np.sin(-ang_norm)+mid[1,:]
+#    x2 = e*np.cos(-ang_norm)+mid[0,:]   
+#    
+#    ax4.plot(x1,y1,color=colu,linewidth=10,alpha=a)
+#    ax4.plot(x2,y2,color=colu,linewidth=10,alpha=a)
+    
+    l.append(ax4.plot(shorelines[shoreline][:,0],shorelines[shoreline][:,1],col,linewidth=2.5))
+    ax4.axis('equal')
+
+l = [l[0][0],l[1][0],l[2][0]]
+ax4.legend(l,('March 5 2020 ($\eta = $'+str(round(zv[0],2))+' m)','August 1 2020 ($\eta = $'+str(round(zv[1],2))+' m)',
+              'August 2 2020 ($\eta = $'+str(round(zv[2],2))+' m)'),loc='lower right',fontsize=6)
+ax4.arrow(135,-150,10,-2,head_width=3,fc='k')  
+ax4.arrow(135,-150,-10,2,head_width=3,fc='k')  
+ax4.text(146,-159,'Ocean')
+ax4.text(115,-144,'Bay')
+
+
+
+#=========================================#
+# 3.3. Analyze #
+#=========================================#
+### Area change between March and Aug 1 ###
+plt.figure()
+plt.plot(shorelines['202003051200'][:,0],shorelines['202003051200'][:,1],'r')
+plt.plot(shorelines['202008011500'][:,0],shorelines['202008011500'][:,1],'g')
+
+# Calculate area of loss on southern side #
+sl1 = shorelines['202003051200']; sl2 = shorelines['202008011500']
+sl1 = sl1[np.where(np.logical_and(sl1[:,0]<270,sl1[:,0]>143))[0],:]; sl2 = sl2[np.where(np.logical_and(sl2[:,0]<270,sl2[:,0]>143))[0],:]
+sl1 = sl1[sl1[:,1]<-118,:]; sl2 = sl2[sl2[:,1]<-118,:]
+# Interpolate to even spacing #
+xi = np.linspace(min(sl1[:,0]),max(sl1[:,0]),1500)
+f1 = interp1d(sl1[:,0],sl1[:,1],bounds_error=False);yi1 = f1(xi)
+f2 = interp1d(sl2[:,0],sl2[:,1],bounds_error=False);yi2 = f2(xi)
+
+plt.figure()
+plt.plot(sl1[:,0],sl1[:,1],'r')
+plt.plot(sl2[:,0],sl2[:,1],'g')
+plt.plot(xi,yi1,'r--')
+plt.plot(xi,yi2,'g--')
+
+# Area between the curves #
+zdif = yi2-yi1
+a_loss = np.trapz(zdif[~np.isnan(zdif)],xi[~np.isnan(zdif)],dx=xi[1]-xi[0])
+
+
+# Now calculate area of gain on northern side #
+sl1 = shorelines['202003051200']; sl2 = shorelines['202008011500']
+sl1 = sl1[np.where(np.logical_and(sl1[:,0]<250,sl1[:,1]>-118))[0],:]; sl2 = sl2[np.where(np.logical_and(sl2[:,0]<250,sl2[:,1]>-118))[0],:]
+
+polygon = np.vstack([sl1,np.flipud(sl2)])
+x = polygon[:,0];y = polygon[:,1]
+a_gain = 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
+
+
+
+### Area change between Aug 1 and Aug 2 ###
+sl1 = shorelines['202008011500']; sl2 = shorelines['202008021146']
+sl1 = sl1[np.where(np.logical_and(sl1[:,0]>200,sl1[:,1]<-100))[0],:]; sl2 = sl2[np.where(np.logical_and(sl2[:,0]>200,sl2[:,1]<-100))[0],:]
+
+# Rotate #
+theta = math.radians(-22)
+R = np.vstack([np.hstack([math.cos(theta),-math.sin(theta)]),np.hstack([math.sin(theta),math.cos(theta)])])
+sl1 = np.transpose(R@np.transpose(sl1));sl2 = np.transpose(R@np.transpose(sl2))
+
+# Interpolate to even spacing #
+xi = np.linspace(min(sl1[:,0]),max(sl1[:,0]),1500)
+f1 = interp1d(sl1[:,0],sl1[:,1],bounds_error=False);yi1 = f1(xi)
+f2 = interp1d(sl2[:,0],sl2[:,1],bounds_error=False);yi2 = f2(xi)
+
+# Area between the curves #
+zdif = yi2-yi1
+a_loss = np.trapz(zdif[0:1090],xi[0:1090],dx=xi[1]-xi[0])
+
+
+
+
+#=========================================#
+# 3.4. Look at outlines between March and August #
+#=========================================#
+shorelines2 = {}
+vids = ['202003051200','202004301009','202005141050','202008011500','202008021146'] # Chose these because they all have similar observed water levels #
+h = None
+zv2 = []
+for vid in vids:
+    
+    # Reduce the video #
+    if not os.path.exists(vidDirec+'StLucie_'+vid+'_reduced.avi'):
+        vidPrep.ReduceVid(vidDirec+'StLucie_'+vid+'.ts') # Reduce the vid to 1 frame per sec
+     
+    # Make the timex #    
+    if not os.path.exists(vidDirec+'StLucie_'+vid+'_timex.png'):
+        timex = sca.CreateImageProduct(vidDirec+'StLucie_'+vid+'_reduced.avi',1)
+        
+        timex_towrite = np.stack([timex[:,:,2]*255,timex[:,:,1]*255,timex[:,:,0]*255],axis=2)
+        cv2.imwrite(vidDirec+'StLucie_'+vid+'_timex.png',timex_towrite) 
+    else:
+        timex = mpimg.imread(vidDirec+'StLucie_'+vid+'_timex.png')
+        
+    # Rectify the timex # # WL not available from API for August at time of writing #
+    z_rectif1 = wlobj1.atTime(wl1,vid) # Get the observed water level fromt the closest station at the top of the hour #
+    z_rectif2 = wlobj2.atTime(wl2,vid) # Get the observed water level fromt the closest station at the top of the hour #
+    distance_betweenStations = 215 # Along-coast distance (km) between the two stations
+    distance_toInlet = 150 # Along-coast distance from northern station to Jupiter Inlet #
+    z_rectif = np.interp(distance_toInlet,[0,distance_betweenStations],[z_rectif1,z_rectif2])
+    zv2.append(z_rectif)
+           
+    im_rectif,extents = comp.RectifyImage(calibVals,timex,[rectif_xmin,rectif_xmax,rectif_dx,rectif_ymin,rectif_ymax,rectif_dy,z_rectif])
+    
+    # ID the shoreline. Need to take a couple contours because of the trees #
+    if h is not None:
+        c,_h = sl.mapShorelineCCD(im_rectif,[rectif_xmin,rectif_xmax,rectif_dx,rectif_ymin,rectif_ymax,rectif_dy,z_rectif],h)
+    else:
+        c,h = sl.mapShorelineCCD(im_rectif,[rectif_xmin,rectif_xmax,rectif_dx,rectif_ymin,rectif_ymax,rectif_dy,z_rectif])
+        
+    if vid==vids[0]:
+        xyz = np.vstack([c[0]]) # Note that the specific contours taken may need to change based on the bounding box that was selected #
+    elif vid==vids[1]:
+        xyz = np.vstack([c[0],c[1]])
+    elif vid==vids[2]:
+        xyz = np.vstack([c[0],c[1]])
+    elif vid==vids[3]:
+        xyz = np.vstack([c[0],c[1]])
+    elif vid==vids[4]:
+        xyz = np.vstack([c[0],c[1]])
+        
+    # Check the shoreline position visually #
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    plt.imshow(im_rectif,extent=extents,interpolation='bilinear')
+    plt.axis('equal')
+    plt.plot(xyz[:,0],xyz[:,1],'r')
+    fig.show()
+#    plt.savefig(vidDirec+'StLucie_'+vid+'_rectif.png')
+    
+    # Save the shoreline #
+    shorelines2[vid] = xyz
+    
+plt.rcParams.update({'font.size': 8})
+fig = plt.figure(figsize=(6,4))
+ax = fig.subplots(1)
+ax.set_xlabel('Relative easting (m)',fontsize=10)
+ax.set_ylabel('Relative northing (m)',fontsize=10)
+
+l = []
+for vid,shoreline,col in zip(vids,shorelines2,['r','g','b','m','y']):
+    
+    timex = mpimg.imread(vidDirec+'StLucie_'+vid+'_timex.png')
+   
+    # Rectify the timex # # WL not available from API for August at time of writing #
+    if vid == vids[0]:
+        z_rectif = zv2[0]
+    elif vid == vids[1]:
+        z_rectif = zv2[1]
+    elif vid == vids[2]:
+        z_rectif = zv2[2]
+    elif vid == vids[3]:
+        z_rectif = zv2[3]
+    else:
+        z_rectif = zv2[4]
+           
+    im_rectif,extents = comp.RectifyImage(calibVals,timex,[rectif_xmin,rectif_xmax,rectif_dx,rectif_ymin,rectif_ymax,rectif_dy,z_rectif])
+    
+    
+    l.append(ax.plot(shorelines2[shoreline][:,0],shorelines2[shoreline][:,1],col,linewidth=2.5))
+    ax.axis('equal')
+
+l = [l[0][0],l[1][0],l[2][0],l[3][0],l[4][0]]
+ax.legend(l,('March 5 2020 ($\eta = $'+str(round(zv2[0],2))+' m)','April 30 2020 ($\eta = $'+str(round(zv2[1],2))+' m)', 'May 14 2020 ($\eta = $'+str(round(zv2[2],2))+' m)',
+              'August 1 2020 ($\eta = $'+str(round(zv2[3],2))+' m)','August 2 2020 ($\eta = $'+str(round(zv2[4],2))+' m)'),loc='lower right',fontsize=6)
+ax.arrow(135,-150,10,-2,head_width=3,fc='k')  
+ax.arrow(135,-150,-10,2,head_width=3,fc='k')  
+ax.text(146,-159,'Ocean')
+ax.text(115,-144,'Bay')
+
+area = []
+for shoreline in shorelines2:
+    polygon = shorelines2[shoreline]
+    x = polygon[:,0]
+    y = polygon[:,1]
+    a = 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
+    area.append(a)
+
+
+
+#=========================================#
+# Map the feature every day in May 2020
+#=========================================#
 direc = '/Users/matthewconlin/Documents/Research/WebCAT/Applications/StLucie/RawVideoData/2020-05/'
 zv3 = []
 f = open('/Users/matthewconlin/Documents/Research/WebCAT/Applications/StLucie/StLucie_area_20210208/CCD_extents.pkl','rb');h = pickle.load(f)
@@ -268,7 +563,8 @@ for vid in sorted([i for i in os.listdir(direc) if '.ts' in i or '.avi' in i]):
         
     shorelines3[date] = xyz
 
-# Make a figure of shoreline maps #
+
+
 plt.rcParams.update({'font.size': 8})
 fig = plt.figure(figsize=(6.5,7))
 ax = fig.subplots(9,4)  
@@ -315,13 +611,6 @@ ax[8][2].axis('off')
 ax[7][0].set_xlabel('Relative Easting (m)',fontsize=8)
 ax[7][0].set_ylabel('Relative Northing (m)',fontsize=8)
 
-
-
-
-#=============================================================================#
-# 4. Perform the uncertainty-incorporated area calculation
-
-#=============================================================================#
 # Calculate the area of the feature each day
 e_total = 6.2
 e_x = np.linspace(0,e_total,1000)
@@ -368,9 +657,8 @@ for ii in range(0,1000):
         area.append(a)
     area_e = np.vstack([area_e,area])
 dtime_area = [datetime.strptime(i,'%Y%m%d%H%M') for i in list(shorelines3.keys())]   
-
-# Make a figure of the area timeseries #    
-fig,ax = plt.subplots(2,figsize=(5,3))
+    
+fig,ax = plt.subplots(2,figsize=(6.5,3))
 for i in range(0,len(shorelines3.keys())):
     ax[0].plot((dtime_area[i],dtime_area[i]),(np.mean(area_e,axis=0)[i],np.mean(area_e,axis=0)[i]+(2*np.std(area_e,axis=0)[i])),'k')
     ax[0].plot((dtime_area[i],dtime_area[i]),(np.mean(area_e,axis=0)[i],np.mean(area_e,axis=0)[i]-(2*np.std(area_e,axis=0)[i])),'k')
@@ -386,7 +674,7 @@ for i in range(0,len(shorelines3.keys())):
     ax[1].plot((dtime_area[i]-timedelta(hours=5),dtime_area[i]+timedelta(hours=5)),(np.mean(area_e,axis=0)[i]-(2*np.std(area_e,axis=0)[i]),np.mean(area_e,axis=0)[i]-(2*np.std(area_e,axis=0)[i])),'k')
 ax[1].plot(dtime_area[1:-1],np.mean(area_e,axis=0)[1:-1],'ks-')
 ax[1].set_xlim(dtime_area[1]-timedelta(days=1),dtime_area[-2]+timedelta(days=1))
-ax[1].set_xticks(dtime_area[1:-1:8])
+ax[1].set_xticks(dtime_area[1:-1:5])
 ax[0].plot((dtime_area[1]-timedelta(days=2),dtime_area[1]-timedelta(days=2)),(6100,7900),color=[.6,.6,.6])
 ax[0].plot((dtime_area[-2]+timedelta(days=2),dtime_area[-2]+timedelta(days=2)),(6100,7900),color=[.6,.6,.6])
 ax[0].plot((dtime_area[1]-timedelta(days=2),dtime_area[-2]+timedelta(days=2)),(6100,6100),color=[.6,.6,.6])
@@ -409,11 +697,8 @@ area = np.mean(area_e,axis=0)
 
 
 
-#=============================================================================#
-# 5. Develop and apply a multiple-regression based model to predict area
-#    values based on temporally averaged currents
-#=============================================================================#
-# Get the wave data for input #
+
+       
 waveobj = utils.NDBCWaveRecord(41114,2020) # Wave observstions from closest buoy #
 waves = waveobj.download()  
 dt = []
@@ -436,14 +721,131 @@ waves['wvht (m)'][i] = np.nan
 i = waves['DPD (sec)'] == 999
 waves['DPD (sec)'][i] = np.nan
 
-# Get the water level data for input #
+  
+
 dtime_wl= list(wl1['Time'])
 dt = []
 for i in dtime_wl:
     dt.append(datetime(int(i[0:4]),int(i[5:7]),int(i[8:10]),int(i[11:13]),int(i[14:16])))
 dtime_wl = dt
 
-# Define the function to calculate the time-averaged lnogshore and tidal currents #
+#R2_all = np.empty([38,0])
+#for iii in range(0,100):
+#    R2 = []
+#    for dur in np.arange(2,90):
+#        Hs = []
+#        wl = []
+#        w_cor = []
+#        V = []
+#        for w,t,n in zip(area[1:-1],dtime_area[1:-1],zv3[1:-1]):
+#            dt_start_waves = t-timedelta(hours=int(dur))
+#            dt_start_wl = t-timedelta(hours=int(dur))
+#            dt_end = t
+#            
+#            # Waves #
+#            i = 0
+#            val = dtime_waves[0]
+#            while val<dt_start_waves:
+#                i+=1
+#                val = dtime_waves[i]
+#            i_start = i
+#            
+#            i = 0
+#            val = dtime_waves[0]
+#            while val<dt_end:
+#                i+=1
+#                val = dtime_waves[i]
+#            i_end = i-1
+#            
+#            Hs.append(np.mean(np.array(waves.iloc[i_start:i_end]['wvht (m)'])))
+#            ###
+#            
+#            # Water level #
+#            i = 0
+#            val = dtime_wl[0]
+#            while val<dt_start_wl:
+#                i+=1
+#                val = dtime_wl[i]
+#            i_start = i
+#            
+#            i = 0
+#            val = dtime_wl[0]
+#            while val<dt_end:
+#                i+=1
+#                val = dtime_wl[i]
+#            i_end = i-1        
+#            
+#            wl.append(max(np.array(wl1.iloc[i_start:i_end]['wl_obs']))-min(np.array(wl1.iloc[i_start:i_end]['wl_obs'])))
+#            V95 = 0.9
+#            V45 = 0.4
+#            c = abs(((max(np.array(wl1.iloc[i_start:i_end]['wl_obs']))-min(np.array(wl1.iloc[i_start:i_end]['wl_obs'])))/0.829))*100
+#            V.append(((c-45)/45)*(V95-V45))
+#            ###
+#    
+#            a_std = float(np.std(area_e,axis=0)[area==w])
+#            a_change = random.choice(np.linspace(w-(2*a_std),w+(2*a_std),1000))
+#            w_cor.append(a_change)
+#        
+#        reg = LinearRegression().fit(np.hstack([np.array(Hs).reshape(-1,1),np.array(V).reshape(-1,1)]),np.array(w_cor).reshape(-1,1))
+#        yhat = reg.predict(np.hstack([np.array(Hs).reshape(-1,1),np.array(V).reshape(-1,1)]))
+#        sst = np.sum((w_cor-np.mean(w_cor))**2)
+#        ssr = np.sum((yhat-np.mean(w_cor))**2)
+#        coef = (ssr/sst)
+#        R2.append(coef)
+#    R2_all = np.hstack([R2_all,np.array(R2).reshape(-1,1)])
+
+
+
+
+
+
+
+
+
+def shoalWave(d,H,T,theta):
+    '''
+    Function to propagate a wave to breakpoint, assuming parallel and linear contours, using linear wave theory.
+    
+    args:
+        d: The depth at which wave observations are collected (e.g. depth of buoy)
+        H: Wave heiight measured at buoy
+        T: Wave period measured at buoy
+        theta: Wave direction measured at buoy
+        
+    returns:
+        Hb: The breaking wave height
+        dir_b: The breaking wave angle relative to the coast
+    
+    '''
+    
+    d_vec = np.arange(-d,0,0.2) # Vector of water depths #
+    # Wave parameters at buoy #  
+    k0 = utils.newtRaph(T,d)
+    C0 = ((2*math.pi)/k0)/T
+    n0 = 0.5*(1+((2*k0*d)/math.sinh(2*k0*d)))
+    alpha0 = theta
+    Hh = H
+    ###
+    # Calc new parameters at each depth #
+    for h in d_vec[1:len(d_vec)]:
+        k = utils.newtRaph(T,-h)
+        C = ((2*math.pi)/k)/T
+        n = 0.5*(1+((2*k*-h)/math.sinh(2*k*-h))) 
+        alpha = math.degrees(math.asin((C/C0)*math.sin(math.radians(alpha0))))
+        Hs = math.sqrt((n0*C0)/(n*C))*math.sqrt(math.cos(math.radians(alpha0))/math.cos(math.radians(alpha)))*Hh
+        if Hs/-h>=0.78:
+            Hb = Hs
+            dir_b = alpha
+            break
+        else:
+            k0 = k
+            C0 = C
+            n0 = n
+            alpha0 = alpha
+            Hh = Hs
+    return Hb,dir_b
+
+
 def calcAveragedCurrents(start_time,averaging_time_waves,averaging_time_wl,timeVec_waves,timeVec_wl,valueVec_waves,valueVec_wl):
     '''
     Function to calculate time-averaged longshore current and tidal current velocity for specified length of time
@@ -505,7 +907,7 @@ def calcAveragedCurrents(start_time,averaging_time_waves,averaging_time_wl,timeV
             else:
                 d = np.nan
             if d is not np.nan:
-                Hb1,dir_b1 = utils.shoalWave(16.5,i[5],i[6],d)
+                Hb1,dir_b1 = shoalWave(16.5,i[5],i[6],d)
             else:
                 Hb1 = np.nan
                 dir_b1 = np.nan
@@ -545,92 +947,6 @@ def calcAveragedCurrents(start_time,averaging_time_waves,averaging_time_wl,timeV
     
     return Vl,Vt
 
-def calcCurrents(timeVec_waves,timeVec_wl,valueVec_waves,valueVec_wl):
-    '''
-    Function to calculate  longshore current and tidal current velocities from timeseries of wave and water level observations
-    
-    Longshore current vel. is calculated using Equation 8.14b in Komar (1998). Waves measured at Buoy 41114 are first
-    propagated to the breakpoint, assuming parallel and uniform contours, using linear wave theory.
-    
-    Tidal current vel is calculated following Tawil et al. (2019) J. Mar. Sci. and Eng, which uses observed tidal amplitude
-    each tidal cycle relative to the mean amplitude, along with assumed spring and neap velocities, to estimate a velocity.
-    
-    args:
-        start_time: Averaging will occur over some period of time prior to this date.
-        averaging_time_waves: The amount of time before start_date for the longshore current velocity average to be calculated (in hours)
-        averaging_time_wl: The amount of time before start_date for the tidal current velocity average to be calculated (in hours)
-        timeVec_waves: The list of datetimes of wave observations
-        timeVec_wl: The list of datetimes of water level observations
-        valueVec_waves: The waves DataFrame generated from the call to utils.NDBCWaveRecord earlier in this script
-        valueVec_wl: The wl DataFrame generated from the call to utils.NOAAWaterLevelRecord earlier in this script
-    returns:
-        Vl: The average longshore current velocity (m/s)
-        Vt: The average tidal current velocity (m/s)
-        
-    '''
-    
-    ### Waves ###
-    Vl = []
-    for i in range(0,len(valueVec_waves)):
-        d1 = waves.iloc[i][-1]
-        if d1<90:
-            d = 90-d1-20 # -20 to correct for orientation of coastline #
-        elif d1>90 and d1<180:
-            d = d1-90-20
-        else:
-            d = np.nan
-        if d is not np.nan:
-            Hb1,dir_b1 = utils.shoalWave(16.5,waves.iloc[i][5],waves.iloc[i][6],d)
-        else:
-            Hb1 = np.nan
-            dir_b1 = np.nan
-       
-        V1 = np.sqrt(np.multiply(9.81,Hb1))*np.sin(np.radians(dir_b1))*np.cos(np.radians(dir_b1))    
-        Vl.append(V1)
-        ########################################
-    
-    ### Water level ####
-    V95 = 0.9
-    V45 = 0.5
-    Vt = []
-    p = find_peaks(valueVec_wl['wl_obs'])
-    for i in range(0,len(valueVec_wl)):
-        d = p[0]-i
-        d_abs = abs(d)
-        dii = np.where(d_abs == min(d_abs))[0]
-        direction = np.sign(i-int(p[0][dii][0]))
-        if direction==1:
-            i_use = np.arange(int(p[0][dii][0]),int(p[0][dii][0])+6)
-        else:
-            i_use = np.arange(int(p[0][dii][0])-6,int(p[0][dii][0]))
-        
-        tide_range = np.max(np.array(valueVec_wl['wl_obs'][i_use]))-np.min(np.array(valueVec_wl['wl_obs'][i_use]))
-        c = tide_range/0.829*100
-        V1 = ((c-45)/45)*(V95-V45)
-        Vt.append(V1)
-        ########################################
-    
-    return Vl,Vt
-
-
-# Look at the calculated currents #
-Vl_full,Vt_full = calcCurrents(dtime_waves,dtime_wl,waves,wl1)
-fig,ax = plt.subplots(2,1,sharex=True)
-ax[0].plot(dtime_waves,Vl_full)
-ax[0].set_ylabel('$V_l$ (m/s)')
-ax[1].plot(dtime_wl,Vt_full)
-ax[1].set_ylabel('$V_t$ (m/s)')
-
-# Is gradient in current speed proportional to current speed?
-dVldt = np.divide(np.diff(Vl_full),[i.total_seconds() for i in np.diff(dtime_waves)])
-
-# What is the cross-correlation between Vl and Vt? #
-
-
-
-
-
-
 # Create the regression model for different averaging times and save R2 of each to find optimal #
 R2_new = np.empty([0,4]) 
 for dur_waves in np.arange(24,30*24,24):
@@ -645,18 +961,22 @@ for dur_waves in np.arange(24,30*24,24):
             Vl.append(Vl1)
             Vt.append(Vt1)
             
-        try:
-#            reg = LinearRegression().fit(np.hstack([np.array(Vl).reshape(-1,1),np.array(Vt).reshape(-1,1)]),np.array(a).reshape(-1,1))
-            reg = LinearRegression().fit(np.hstack([np.array(Vl)[~np.isnan(Vl)].reshape(-1,1),np.array(Vt)[~np.isnan(Vl)].reshape(-1,1)]),np.array(a)[~np.isnan(Vl)].reshape(-1,1))
-        except:
+        if len(np.array(Vl)[~np.isnan(Vl)])<20:
             R2_new = np.vstack([R2_new,np.hstack([dur_waves,dur_wl,np.nan,np.nan])])
         else:
-            yhat = reg.predict(np.hstack([np.array(Vl)[~np.isnan(Vl)].reshape(-1,1),np.array(Vt)[~np.isnan(Vl)].reshape(-1,1)]))
-            sst = np.sum((a[~np.isnan(Vl)]-np.mean(a[~np.isnan(Vl)]))**2)
-            ssr = np.sum((yhat-np.mean(a[~np.isnan(Vl)]))**2)
-            coef = (ssr/sst)
-            rmse = np.sqrt(np.sum((yhat-a[~np.isnan(Vl)])**2)/len(yhat))
-            R2_new = np.vstack([R2_new,np.hstack([dur_waves,dur_wl,coef,rmse])])
+            
+            try:
+    #            reg = LinearRegression().fit(np.hstack([np.array(Vl).reshape(-1,1),np.array(Vt).reshape(-1,1)]),np.array(a).reshape(-1,1))
+                reg = LinearRegression().fit(np.hstack([np.array(Vl)[~np.isnan(Vl)].reshape(-1,1),np.array(Vt)[~np.isnan(Vl)].reshape(-1,1)]),np.array(a)[~np.isnan(Vl)].reshape(-1,1))
+            except:
+                R2_new = np.vstack([R2_new,np.hstack([dur_waves,dur_wl,np.nan,np.nan])])
+            else:
+                yhat = reg.predict(np.hstack([np.array(Vl)[~np.isnan(Vl)].reshape(-1,1),np.array(Vt)[~np.isnan(Vl)].reshape(-1,1)]))
+                sst = np.sum((a[~np.isnan(Vl)]-np.mean(a[~np.isnan(Vl)]))**2)
+                ssr = np.sum((yhat-np.mean(a[~np.isnan(Vl)]))**2)
+                coef = (ssr/sst)
+                rmse = np.sqrt(np.sum((yhat-a[~np.isnan(Vl)])**2)/len(yhat))
+                R2_new = np.vstack([R2_new,np.hstack([dur_waves,dur_wl,coef,rmse])])
 
 
 # Visualize the results #
@@ -674,13 +994,13 @@ fig.colorbar(h,cax=cbax,orientation='horizontal',ticklocation='top',label='$R^2$
 ax.plot(12,14,'k*',markersize=10)
 ax.plot((0,12),(14,14),'k--')
 ax.plot((12,12),(0,14),'k--')
-r = patches.Rectangle((13,1),17,30,color='w',alpha=.7)
+r = Rectangle((13,1),17,30,color='w',alpha=.7)
 ax.add_artist(r)
 
 # Run the model that uses the optimal averaging times #
 vals_best = R2_new[np.where(R2_new[:,2]==np.nanmax(R2_new[:,2]))[0],:]
-dur_waves_best = 12*24#int(vals_best[0][0])
-dur_wl_best = 14*24#int(vals_best[0][1])
+dur_waves_best = int(vals_best[0][0])
+dur_wl_best = int(vals_best[0][1])
 Vl = []
 Vt = []
 a = area#[1:-1]
@@ -689,8 +1009,7 @@ for t in dtime_area:#[1:-1]:
     Vl1,Vt1 = calcAveragedCurrents(t,dur_waves_best,dur_wl_best,dtime_waves,dtime_wl,waves,wl1)
     Vl.append(Vl1)
     Vt.append(Vt1)
-
- 
+    
 reg = LinearRegression().fit(np.hstack([np.array(Vl)[~np.isnan(Vl)].reshape(-1,1),np.array(Vt)[~np.isnan(Vl)].reshape(-1,1)]),np.array(a)[~np.isnan(Vl)].reshape(-1,1))
 yhat = reg.predict(np.hstack([np.array(Vl)[~np.isnan(Vl)].reshape(-1,1),np.array(Vt)[~np.isnan(Vl)].reshape(-1,1)]))
 sst = np.sum((a[~np.isnan(Vl)]-np.mean(a[~np.isnan(Vl)]))**2)
@@ -832,3 +1151,145 @@ ax[1].set_xticklabels([])
 ax[0].text(0.01, 0.97, 'a', transform=ax[0].transAxes,fontsize=8, fontweight='bold', va='top',color='k')
 ax[1].text(0.01, 0.97, 'b', transform=ax[1].transAxes,fontsize=8, fontweight='bold', va='top',color='k')
 ax[2].text(0.01, 0.97, 'c', transform=ax[2].transAxes,fontsize=8, fontweight='bold', va='top',color='k')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+R2 = []
+for dur_waves in np.arange(2,30*24):
+        Hs = []
+        w_cor = []  
+        wl = []
+        dur_wl = 12
+        for w,t,n in zip(area[1:-2],dtime_area[1:-2],zv3[1:-2]):
+            dt_start_waves = t-timedelta(hours=int(dur_waves))
+            dt_start_wl = t-timedelta(hours=int(dur_wl))
+            dt_end = t
+    
+            # Waves #
+            i = 0
+            val = dtime_waves[0]
+            while val<dt_start_waves:
+                i+=1
+                val = dtime_waves[i]
+            i_start_waves = i
+            
+            i = 0
+            val = dtime_waves[0]
+            while val<dt_end:
+                i+=1
+                val = dtime_waves[i]
+            i_end_waves = i-1
+        
+            
+            Hs.append(np.nanmean(np.array(waves.iloc[i_start_waves:i_end_waves]['wvht (m)'])))
+            ###
+            
+            # Water level #
+            i = 0
+            val = dtime_wl[0]
+            while val<dt_start_wl:
+                i+=1
+                val = dtime_wl[i]
+            i_start_wl = i
+            
+            i = 0
+            val = dtime_wl[0]
+            while val<dt_end:
+                i+=1
+                val = dtime_wl[i]
+            i_end_wl = i-1        
+        
+            wl.append(max(np.array(wl1.iloc[i_start_wl:i_end_wl]['wl_obs']))-min(np.array(wl1.iloc[i_start_wl:i_end_wl]['wl_obs'])))
+            ###
+        
+        
+            w_cor.append(w)
+        try:
+            reg = LinearRegression().fit(np.hstack([np.array(Hs).reshape(-1,1),np.array(wl).reshape(-1,1)]),np.array(w_cor).reshape(-1,1))
+        except:
+            R2.append(np.nan)
+        else:
+            yhat = reg.predict(np.hstack([np.array(Hs).reshape(-1,1),np.array(wl).reshape(-1,1)]))
+            sst = np.sum((w_cor-np.mean(w_cor))**2)
+            ssr = np.sum((yhat-np.mean(w_cor))**2)
+            coef = (ssr/sst)
+            R2.append(coef)
+
+R2_max = max(R2)
+R2_max_hours = np.arange(2,30*24)[np.where(R2==max(R2))[0]]
+
+
+            
+## Use the best model to predice the observable area until August 1 #
+#t_start = datetime(2020,5,31,15,0)
+#tt = []
+#tt.append(t_start) 
+#t_now = t_start
+#while t_now<=dtime_area[-1]:
+#    t_now = t_now+timedelta(days=1)
+#    tt.append(t_now)
+#
+#a_pred = []    
+#for t in tt:
+#    dt_start = t-timedelta(hours=4)
+#    dt_end = t
+#
+#    # Waves #
+#    i = 0
+#    val = dtime_waves[0]
+#    while val<dt_start:
+#        i+=1
+#        val = dtime_waves[i]
+#    i_start = i
+#    
+#    i = 0
+#    val = dtime_waves[0]
+#    while val<dt_end:
+#        i+=1
+#        val = dtime_waves[i]
+#    i_end = i-1
+#    
+#    Hs = np.mean(np.array(waves.iloc[i_start:i_end]['wvht (m)']))
+#    ###
+#    
+#    # Water level #
+#    i = 0
+#    val = dtime_wl[0]
+#    while val<dt_start:
+#        i+=1
+#        val = dtime_wl[i]
+#    i_start = i
+#    
+#    i = 0
+#    val = dtime_wl[0]
+#    while val<dt_end:
+#        i+=1
+#        val = dtime_wl[i]
+#    i_end = i-1        
+#    
+#    wl = max(np.array(wl1.iloc[i_start:i_end]['wl_obs']))-min(np.array(wl1.iloc[i_start:i_end]['wl_obs']))
+#    
+#    # Make the prediction #
+#    a_pred.append(float(reg.predict(np.array([Hs,wl]).reshape(1,-1))))
+#
+#plt.plot(dtime_area,area,'bs-')
+#plt.plot(tt,a_pred,'r')
+
+        
