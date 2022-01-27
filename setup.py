@@ -15,7 +15,7 @@ setuptools.setup(
     author_email="conlinm@ufl.edu",
     description="Python implementations of some coastal imaging utilities.",
     packages=setuptools.find_packages(),
-    install_requires=['opencv-python','matplotlib','numpy','pandas','pickle','scipy','scikit-image','scikit-learn'],
+    install_requires=['opencv-python','matplotlib','numpy','pandas','scipy','scikit-image','scikit-learn'],
     classifiers=[
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
