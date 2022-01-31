@@ -24,7 +24,7 @@ from pyArgus_mpc import computation as comp
 #=============================================================================#
 # Establish things we need later #
 #=============================================================================#
-dataDirec = '/Users/matthewconlin/Documents/Research/WebCAT/pyArgus_mpc_project/pyArgus_mpc/SurfcamArgus/GeophysicalAnalyses/JupiterInletFL/data'# os.getcwd()+'/data' # MAKE SURE YOUR CURRENT WORKING DIRECTORY IS WHERE THIS SCRIPT LIVES #
+dataDirec = os.getcwd()+'/data' # MAKE SURE YOUR CURRENT WORKING DIRECTORY IS WHERE THIS SCRIPT LIVES #
 
 rectif_xmin = -200
 rectif_xmax = 200
