@@ -54,9 +54,9 @@ class NOAAWaterLevelRecord():
             self.edate = str(self.eyear)+'1231'
         
             api = 'https://tidesandcurrents.noaa.gov/api/datagetter?product='+product+'&begin_date='
-            url = api+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=MSL&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&format=csv'
+            url = api+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=navd&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&format=csv'
             api2 = 'https://tidesandcurrents.noaa.gov/api/datagetter?product='+product2+'&begin_date='
-            url2 = api2+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=MSL&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&interval=h&format=csv'
+            url2 = api2+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=navd&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&interval=h&format=csv'
             
             
             dat_obs = pd.read_csv(url)
@@ -71,9 +71,9 @@ class NOAAWaterLevelRecord():
                 self.edate = str(yr)+'1231'
                 
                 api = 'https://tidesandcurrents.noaa.gov/api/datagetter?product='+product+'&begin_date='
-                url = api+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=MSL&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&format=csv'
+                url = api+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=navd&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&format=csv'
                 api2 = 'https://tidesandcurrents.noaa.gov/api/datagetter?product='+product2+'&begin_date='
-                url2 = api2+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=MSL&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&interval=h&format=csv'
+                url2 = api2+str(self.bdate)+'&end_date='+str(self.edate)+'&datum=navd&station='+str(self.station)+'&time_zone=lst_ldt&units=metric&interval=h&format=csv'
             
                 if dat_obs is None:
                     dat_obs = pd.read_csv(url)
