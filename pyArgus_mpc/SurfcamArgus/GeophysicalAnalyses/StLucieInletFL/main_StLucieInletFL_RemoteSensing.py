@@ -35,8 +35,8 @@ from pyArgus_mpc.SurfcamArgus.GeophysicalAnalyses import vidPrep
 #=============================================================================#
 # Establish things we need later #
 #=============================================================================#
-vidDirec = '/Users/matthewconlin/Documents/Research/WebCAT/Applications/StLucie/RawVideoData/2020-05' # CHANGE THIS TO THE DIRECTORY WHERE YOU SAVED THE VIDEOS #
-dataDirec = '/Users/matthewconlin/Documents/Research/WebCAT/pyArgus_mpc_project/pyArgus_mpc/SurfcamArgus/GeophysicalAnalyses/StLucieInletFL/data'# os.getcwd()+'/data' # MAKE SURE YOUR CURRENT WORKING DIRECTORY IS WHERE THIS SCRIPT LIVES #
+vidDirec = '/' # CHANGE THIS TO THE DIRECTORY WHERE YOU SAVED THE VIDEOS #
+dataDirec = os.getcwd()+'/data' # MAKE SURE YOUR CURRENT WORKING DIRECTORY IS WHERE THIS SCRIPT LIVES #
 
 rectif_xmin = 100
 rectif_xmax = 350
