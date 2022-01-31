@@ -1,2 +1,8 @@
 # pyArgus_mpc
-Python implementation of video image processing tools from the CIRN/OSU/Argus repos, as well as others, developed by Matt Conlin.
+Python implementation of some video image processing tools and video-image analyses from surfcams.
+
+Created by Matthew P. Conlin, University of Florida
+
+## Download ##
+```bash
+pip install git+https://github.com/conlin-matt/pyArgus_mpc
